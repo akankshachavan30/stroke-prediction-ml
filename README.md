@@ -1,2 +1,91 @@
-# stroke-prediction-ml
-End-to-end machine learning project predicting stroke outcomes using demographic and clinical health data.
+# Stroke Prediction Using Machine Learning
+
+An end-to-end binary classification project on a tabular stroke dataset (5,110 records, 11 predictors). It covers data validation, exploratory analysis with statistical tests, leakage-free preprocessing, model comparison with cross-validation, threshold selection, a single held-out evaluation with bootstrap confidence intervals, and interpretation with its limits.
+
+> **Educational project, not a clinical tool.** Everything here describes statistical *associations* in one observational dataset of unknown provenance. Nothing shows that any variable *causes* stroke, and the models must not be used to diagnose, screen or make decisions about real patients.
+
+## Key results
+
+| | |
+|---|---|
+| Records / stroke cases | 5,110 / 249 (4.9%) |
+| Final model | Histogram gradient boosting (class-weighted), threshold 0.61 chosen on out-of-fold training predictions |
+| Test ROC-AUC | **0.845** (95% bootstrap CI 0.79-0.89) |
+| Test PR-AUC | **0.277** (0.18-0.40); no-skill baseline = 0.049 |
+| Test recall / precision @ 0.61 | 0.66 (33 of 50 strokes found) / 0.18 (151 false alarms among 184 flagged) |
+
+Honest reading: the models rank stroke records well above chance, but with ~5% prevalence, ~50 test positives and only routine demographic/health variables, precision is low and confidence intervals are wide. Logistic regression, random forest and gradient boosting were not clearly distinguishable in cross-validation (ROC-AUC 0.82-0.85, PR-AUC about 0.20-0.22). Always predicting "no stroke" would be 95.1% accurate and find no strokes, which is why accuracy is not used.
+
+![Stroke rate by age](images/04_stroke_rate_by_age.png)
+
+![Held-out test evaluation](images/08_test_evaluation.png)
+
+## Research questions
+
+1. How is stroke distributed, and what does the imbalance imply for evaluation?
+2. How do demographic and health variables differ between stroke and non-stroke records?
+3. How does the stroke rate vary with age, and does age confound other associations?
+4. Is a missing BMI value related to the outcome?
+5. Do ML models beat a no-skill baseline, and which performs best in cross-validation?
+6. Which decision threshold gives a sensible recall/precision trade-off, and how well does the model generalise?
+7. Which variables drive predictions, and what can and cannot be concluded?
+
+## Main findings
+
+* **Age dominates.** Stroke rate rises from 0.2% (under 18) to 21.5% (80+). Permutation importance of age is about 3x that of the next variable.
+* **Hypertension and heart disease** have higher crude rates (13.3% vs 4.0%; 17.0% vs 4.2%) and remain higher within age strata, although younger strata contain very few events.
+* **Confounding by age.** The crude marital-status gap (6.6% vs 1.7%) and the very low rate for `work_type = children` mostly reflect age; within age strata the marriage gap disappears. In the logistic model, `work_type_children` even gets a positive coefficient purely through collinearity with age, a good reminder that coefficients are not effects.
+* **Missing BMI is informative.** Stroke rate 19.9% with missing BMI vs 4.3% otherwise, also within age strata. The pipeline therefore adds a `bmi_missing` indicator. Why BMI is missing is unknown, so this may be a data-collection artefact.
+* **Gender and residence type** show no meaningful difference.
+
+## Methodology
+
+* **Validation:** raw file structure (12 fields on every line), schema, `N/A` parsed as missing BMI, duplicate and id checks. No observation is altered or dropped.
+* **Split:** stratified 80/20; the test set is used once at the end.
+* **Preprocessing (inside a scikit-learn `Pipeline`, so no leakage):** median imputation + standardisation for numeric variables, pass-through for binary flags, one-hot encoding for categoricals; `id` dropped.
+* **Imbalance:** class weights, not resampling or synthetic data.
+* **Models:** dummy baseline, logistic regression, random forest, histogram gradient boosting; 5-fold stratified CV, small grid searches optimising PR-AUC.
+* **Threshold:** chosen to maximise F2 on out-of-fold *training* predictions (assumes missing a case costs more than a false alarm; a stated assumption, not a clinical truth).
+* **Evaluation:** ROC-AUC, PR-AUC, recall, precision, specificity, F1/F2, balanced accuracy, confusion matrix, 2,000-resample bootstrap CIs, calibration sanity check (scores are ranking scores, not probabilities: mean score 27% vs observed 4.9%).
+* **Interpretation:** logistic-regression odds ratios (direction) and permutation importance on the test set (reliance).
+
+## Repository structure
+
+```
+.
+├── stroke_prediction.ipynb              # full analysis with executed outputs
+├── healthcare-dataset-stroke-data.csv   # dataset (third-party; see licence note)
+├── images/                              # figures generated by the notebook
+├── requirements.txt
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
+## How to run
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+jupyter lab stroke_prediction.ipynb
+```
+
+Then choose **Kernel > Restart & Run All**. The notebook expects the CSV in the same folder and writes figures to `images/`. The random seed is fixed (42); the numbers above were produced with pandas 3.0.5, numpy 2.5.3 and scikit-learn 1.9.1 and may differ slightly with other versions. The hyper-parameter search is the slowest step (a few minutes on a laptop).
+
+## Limitations
+
+* Observational data of unclear provenance; the file says nothing about sampling, time period or population, and 4.9% prevalence is unlikely to match any general population.
+* The outcome is a *recorded* stroke with unclear timing relative to the predictors, so some associations may be consequences rather than risk factors.
+* Only 249 positives overall (50 in the test set): estimates are imprecise and model differences are within noise.
+* Missing BMI (201 records) is related to the outcome; `smoking_status = Unknown` covers 30% of records; extreme values were kept.
+* Limited predictors (no blood pressure values, cholesterol, atrial fibrillation, medications, family history).
+* Threshold reflects an assumed cost ratio; scores are uncalibrated; no external validation or subgroup fairness analysis; exploratory p-values are uncorrected.
+
+## Possible extensions
+
+Nested/repeated cross-validation, probability calibration, cost-sensitive thresholds, SHAP, subgroup and fairness analysis, and external validation on data where predictors precede the outcome.
+
+## Licence and data
+
+Code, notebook text and documentation: MIT (see `LICENSE`). The dataset file is **third-party data** and is *not* covered by that licence. Its schema matches the dataset commonly shared on Kaggle as the "Stroke Prediction Dataset", but the licence, source and redistribution terms were not verified when this repository was created. Check the terms on the original source page before publishing or redistributing the CSV, and if they do not allow redistribution, remove it from the repository and add download instructions instead.
